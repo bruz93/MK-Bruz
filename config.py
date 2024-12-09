@@ -1,7 +1,7 @@
 # config.py
 
-TELEGRAM_TOKEN = '7654165615:AAH1OkCz3owUyaI1AevHn04npneAmOg68fo'
+TELEGRAM_TOKEN = 'xxxxxxxxxxxxxx'
 
-MIKROTIK_REST_API_URL = 'http://202.46.152.23:8181/rest'
-MIKROTIK_REST_API_USER = 'api'
-MIKROTIK_REST_API_PASSWORD = 'api2025'
+MIKROTIK_REST_API_URL = 'xxxxxxxxxxxxxxxxxxx'
+MIKROTIK_REST_API_USER = 'xxxxxxxxxxxxxxxxxxxx'
+MIKROTIK_REST_API_PASSWORD = 'xxxxxxxxxx'
