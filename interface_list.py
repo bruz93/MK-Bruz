@@ -12,5 +12,6 @@ def get_interface_list():
     # Tambahkan status enable/disable
     for interface in interfaces:
         interface['status'] = 'enabled' if interface.get('disabled') == 'false' else 'disabled'
+        interface['comment'] = interface.get('comment', '')
     
     return interfaces

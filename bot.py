@@ -1,14 +1,19 @@
 import telebot
 from telebot import types
+import math
+import re
 from config import TELEGRAM_TOKEN
 from menu import get_menu
 from interface_list import get_interface_list
 from pppoe_list import get_pppoe_list
 from ip_address_list import get_ip_list
+from dns import get_dns
 from neighbor_list import get_neighbor_list
+from route_list import get_route_list
 from interface_management import disable_interface, enable_interface, change_interface_name
 from pppoe_management import add_pppoe_user, disable_pppoe, enable_pppoe, change_pppoe_name, remove_pppoe
 from ip_address_management import add_ip_address, disable_ip, enable_ip, change_ip_interface, remove_ip
+from route_management import add_route, disable_route, enable_route, change_route_distance, remove_route
 from interface_status import get_interface_status
 from hotspot_user import get_hotspot_user_data
 from hotspot_find_user import find_hotspot_user
@@ -18,6 +23,8 @@ from hotspot_delete_active import hotspot_delete_active
 from hotspot_profile_list import get_hotspot_profile_list
 from hotspot_ip_binding import get_hotspot_ip_binding
 from hotspot_gen_vc import get_profile_list, generate_vouchers
+from queue_list import get_queue_list
+from queue_management import disable_queue, enable_queue, change_queue_limit
 from netwatch_list import get_netwatch_list
 from netwatch_management import add_netwatch, disable_netwatch, enable_netwatch, change_netwatch_host, remove_netwatch
 from netwatch_id import get_netwatch_id
@@ -30,6 +37,10 @@ bot = telebot.TeleBot(TELEGRAM_TOKEN)
 interface_rename_state = {}
 pppoe_rename_state = {}
 ip_set_state = {}
+dns_set_state = {}
+route_set_state = {}
+queue_pages = {}
+queue_set_state = {}
 netwatch_set_state = {}
 voucher_generation_state = {}
 hotspot_state = {}
@@ -45,6 +56,7 @@ def send_welcome(message):
     markup.add(types.KeyboardButton("PPPOE"))
     markup.add(types.KeyboardButton("IP"))
     markup.add(types.KeyboardButton("Hotspot"))
+    markup.add(types.KeyboardButton("Queue"))
     markup.add(types.KeyboardButton("Netwatch"))
     bot.reply_to(message, "Selamat datang di Bot MikroTik! Silakan pilih menu:", reply_markup=markup)
 
@@ -83,9 +95,20 @@ def ip_menu(message):
     markup.add(types.KeyboardButton("Enable-IP"))
     markup.add(types.KeyboardButton("Set-IP-Interface"))
     markup.add(types.KeyboardButton("Remove-IP"))
+    markup.add(types.KeyboardButton("Dns-IP"))
     markup.add(types.KeyboardButton("Neighbor-IP"))
+    markup.add(types.KeyboardButton("Route-IP"))
     markup.add(types.KeyboardButton("Kembali"))
     bot.reply_to(message, "Silakan pilih perintah IP:", reply_markup=markup)
+    
+@bot.message_handler(func=lambda message: message.text == "Dns-IP")
+def dns_menu(message):
+    logger.info(f"Dns menu selected by {message.chat.id}")
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add(types.KeyboardButton("List-Dns"))
+    # markup.add(types.KeyboardButton("Set-Dns"))
+    markup.add(types.KeyboardButton("Kembali"))
+    bot.reply_to(message, "Silakan pilih perintah dns:", reply_markup=markup)
 
 @bot.message_handler(func=lambda message: message.text == "Hotspot")
 def hotspot_menu(message):
@@ -101,6 +124,32 @@ def hotspot_menu(message):
     markup.add(types.KeyboardButton("Generate"))
     markup.add(types.KeyboardButton("Kembali"))
     bot.reply_to(message, "Silakan pilih perintah hotspot:", reply_markup=markup)
+    
+@bot.message_handler(func=lambda message: message.text == "Route-IP")
+def route_menu(message):
+    logger.info(f"Route menu selected by {message.chat.id}")
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add(types.KeyboardButton("List-Route"))
+    markup.add(types.KeyboardButton("Add-Route"))
+    markup.add(types.KeyboardButton("Disable-Route"))
+    markup.add(types.KeyboardButton("Enable-Route"))
+    markup.add(types.KeyboardButton("Set-Route-Distance"))
+    markup.add(types.KeyboardButton("Remove-Route"))
+    markup.add(types.KeyboardButton("Kembali"))
+    bot.reply_to(message, "Silakan pilih perintah route:", reply_markup=markup)
+
+@bot.message_handler(func=lambda message: message.text == "Queue")
+def queue_menu(message):
+    logger.info(f"Queue menu selected by {message.chat.id}")
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add(types.KeyboardButton("List-Queue"))
+    markup.add(types.KeyboardButton("Add-Queue"))
+    markup.add(types.KeyboardButton("Disable-Queue"))
+    markup.add(types.KeyboardButton("Enable-Queue"))
+    markup.add(types.KeyboardButton("Limit"))
+    markup.add(types.KeyboardButton("Remove-Queue"))
+    markup.add(types.KeyboardButton("Kembali"))
+    bot.reply_to(message, "Silakan pilih perintah Queue:", reply_markup=markup)
 
 @bot.message_handler(func=lambda message: message.text == "Netwatch")
 def netwatch_menu(message):
@@ -123,6 +172,7 @@ def main_menu(message):
     markup.add(types.KeyboardButton("PPPOE"))
     markup.add(types.KeyboardButton("IP"))
     markup.add(types.KeyboardButton("Hotspot"))
+    markup.add(types.KeyboardButton("Queue"))
     markup.add(types.KeyboardButton("Netwatch"))
     bot.reply_to(message, "Silakan pilih menu:", reply_markup=markup)
 
@@ -131,7 +181,7 @@ def main_menu(message):
 def send_interface_list(message):
     logger.info(f"Received List command from {message.chat.id}")
     interfaces = get_interface_list()
-    interface_info = "\n".join([f"⏹️ {interface['name']} # {interface['type']} # {'✅' if interface['status'] == 'enabled' else '❌'}" for interface in interfaces])
+    interface_info = "\n".join([f"⏹️ {interface['name']} \n{interface['comment']} \n{interface['type']} {'✅' if interface['status'] == 'enabled' else '❌'}\n\n" for interface in interfaces])
     bot.reply_to(message, interface_info)
 
 @bot.message_handler(func=lambda message: message.text == "Disable")
@@ -282,7 +332,7 @@ def send_pppoe_list(message):
     ])
     # Kirim balasan ke bot dengan informasi PPPoE
     bot.reply_to(message, interface_info)
-    
+
 @bot.message_handler(func=lambda message: message.text == "Add-PPPOE")
 def add_pppoe_menu(message):
     logger.info(f"Add PPPoE menu selected by {message.chat.id}")
@@ -412,7 +462,7 @@ def send_ip_list(message):
     ])
     # Kirim balasan ke bot dengan informasi PPPoE
     bot.reply_to(message, ip_info)
-    
+
 @bot.message_handler(func=lambda message: message.text == "Add-IP")
 def add_ip_menu(message):
     logger.info(f"Add IP menu selected by {message.chat.id}")
@@ -529,7 +579,150 @@ def handle_remove_ip(message):
     logger.info(f"Received /ip_remove command for {address} from {message.chat.id}")
     result = remove_ip(address)
     bot.reply_to(message, result)
+    
+# handler Route
+@bot.message_handler(func=lambda message: message.text == "List-Route")
+def send_route_list(message):
+    logger.info(f"Received List command from {message.chat.id}")  
+    routes = get_route_list()  
+    if not routes:
+        bot.reply_to(message, "Tidak ada route yang ditemukan.")
+        return
+    route_info = "\n".join([  
+        f"number: {route['.id']} \ndst-address: {route['dst-address']} \n(gateway: {route['gateway']}) \n(distance: {route['distance']}) \n(local-address: {route['local-address']}) \n(immediate-gw: {route['immediate-gw']}) \n(routing-table: {route['routing-table']}) \n(scope: {route['scope']}) \n(target-scope: {route['target-scope']}) \n(vrf-interface: {route['vrf-interface']})"
+        f"\n# {'❌ Disable' if route['status'] == 'disabled' else '✅ Enabled'} - {'✅ active' if route['inactive'] == 'active' else '❌inactive'} - {'✅ ecmp' if route['ecmp'] == 'ecmp' else '❌ecmp'} - {'✅ hw-offloaded' if route['hw-offloaded'] == 'hw-offloaded' else '❌ hw-offloaded'} - {'✅ vpn' if route['vpn'] == 'vpn' else '❌vpn'}"
+        f"- {'🔃 Dynamic' if route['dynamic'] == 'Dynamic' else '🔒Static'} - {'✅ connect' if route['connect'] == 'connect' else '❌disconnect'} \nComment: {route['comment']} ;\n\n"
+        for route in routes
+    ])
+    # Kirim balasan ke bot dengan informasi 
+    max_length = 4096
+    for i in range(0, len(route_info), max_length):
+        bot.reply_to(message, route_info[i:i + max_length])
 
+@bot.message_handler(func=lambda message: message.text == "Add-Route")
+def add_route_menu(message):
+    logger.info(f"Add route menu selected by {message.chat.id}")
+    bot.reply_to(
+        message,
+        "Masukkan detail route dalam format berikut:\n\n`dst-address gateway distance comment`\n\nContoh:\n`0.0.0.0/0 pppoe-out2 2 srouteFiberstar`",
+        parse_mode="Markdown"
+    )
+
+@bot.message_handler(func=lambda message: " " in message.text and len(message.text.split()) == 4)
+def handle_add_route(message):
+    try:
+        # Parsing input
+        dst_address, gateway, distance, comment = map(str.strip, message.text.split())
+        logger.info(f"Received Add Route request: dst_address={dst_address}, gateway={gateway}, distance={distance}, comment={comment}")
+        # Panggil fungsi add_ip_address
+        result = add_route(dst_address=dst_address, gateway=gateway, distance=distance, comment=comment)
+        # Balas dengan hasil
+        bot.reply_to(message, result)
+    except ValueError:
+        bot.reply_to(
+            message,
+            "Format input tidak valid. Pastikan menggunakan format:\n`dst-address gateway distance comment`",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(f"Failed to add Route address: {e}")
+        bot.reply_to(message, f"Gagal menambahkan IP Route. Error: {e}")
+        
+@bot.message_handler(func=lambda message: message.text == "Disable-Route")
+def disable_route_menu(message):
+    logger.info(f"Disable menu selected by {message.chat.id}")
+    routes = get_route_list()
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    for route in routes:
+        markup.add(types.KeyboardButton(f"Disable-Route {route['.id']}"))
+    markup.add(types.KeyboardButton("Kembali"))
+    bot.reply_to(message, "Silakan pilih route yang akan di-disable:", reply_markup=markup)
+
+@bot.message_handler(func=lambda message: message.text.startswith("Disable-Route "))
+def handle_disable_route(message):
+    route_id = message.text.split("Disable-Route ")[1]
+    logger.info(f"Received /route_disable command for {route_id} from {message.chat.id}")
+    result = disable_route(route_id)
+    bot.reply_to(message, result)
+
+@bot.message_handler(func=lambda message: message.text == "Enable-Route")
+def enable_route_menu(message):
+    logger.info(f"Enable menu selected by {message.chat.id}")
+    routes = get_route_list()
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    for route in routes:
+        markup.add(types.KeyboardButton(f"Enable-Route {route['.id']}"))
+    markup.add(types.KeyboardButton("Kembali"))
+    bot.reply_to(message, "Silakan pilih route yang akan di-enable:", reply_markup=markup)
+
+@bot.message_handler(func=lambda message: message.text.startswith("Enable-Route "))
+def handle_enable_route(message):
+    route_id = message.text.split("Enable-Route ")[1]
+    logger.info(f"Received /route_enable command for {route_id} from {message.chat.id}")
+    result = enable_route(route_id)
+    bot.reply_to(message, result)
+
+@bot.message_handler(func=lambda message: message.text == "Set-Route-Distance")
+def distance_route_menu(message):
+    logger.info(f"Distance menu selected by {message.chat.id}")
+    routes = get_route_list()
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    for route in routes:
+        markup.add(types.KeyboardButton(f"Distance {route['.id']}"))
+    markup.add(types.KeyboardButton("Kembali"))
+    bot.reply_to(message, "Silakan pilih route yang akan di-distance:", reply_markup=markup)
+
+@bot.message_handler(func=lambda message: message.text.startswith("Distance "))
+def handle_distance_route(message):
+    try:
+        route_id = message.text.split("Distance ")[1].strip()
+        if not route_id:
+            raise ValueError("Route ID kosong.")
+        logger.info(f"Received /route_c_distance command for {route_id} from {message.chat.id}")
+        route_set_state[message.chat.id] = route_id
+        bot.reply_to(message, f"Masukkan distance baru untuk route {route_id}:")
+    except IndexError:
+        bot.reply_to(message, "Format pesan tidak valid. Gunakan 'Set-Route-Distance Distance <route_id>'.")
+
+@bot.message_handler(func=lambda message: message.chat.id in route_set_state)
+def handle_new_route_distance(message):
+    old_distance = route_set_state.pop(message.chat.id, None)
+    if old_distance:
+        new_distance = message.text.strip()
+        if not new_distance.isdigit() or int(new_distance) <= 0:
+            bot.reply_to(message, "Distance harus berupa angka positif.")
+            return
+        logger.info(f"Distancing route {old_distance} to {new_distance}")
+        result = change_route_distance(old_distance, new_distance)
+        bot.reply_to(message, f"Hasil: {result}\nGunakan perintah List-Route untuk mengecek apakah distance route sudah berhasil di ganti.")
+    else:
+        bot.reply_to(message, "Tidak ada permintaan perubahan distance route yang aktif.")
+
+@bot.message_handler(func=lambda message: message.text == "Remove-Route")
+def remove_route_menu(message):
+    logger.info(f"Remove menu selected by {message.chat.id}")
+    routes = get_route_list()  
+    if not routes:
+        bot.reply_to(message, "Tidak ada route yang ditemukan.")
+        return
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    for route in routes:
+        markup.add(types.KeyboardButton(f"Remove-Route {route['.id']}"))
+    markup.add(types.KeyboardButton("Kembali"))
+    bot.reply_to(message, "Silakan pilih route yang akan dihapus:", reply_markup=markup)
+
+@bot.message_handler(func=lambda message: message.text.startswith("Remove-Route "))
+def handle_remove_route(message):
+    route_id = message.text.split("Remove-Route ")[1].strip()
+    logger.info(f"Received /route_remove command for {route_id} from {message.chat.id}")
+    routes = get_route_list()
+    if any(route['.id'] == route_id for route in routes): 
+        result = remove_route(route_id)
+        bot.reply_to(message, result)
+    else:
+        bot.reply_to(message, f"Route dengan id {route_id} tidak ditemukan.")
+
+# handler neigbor
 @bot.message_handler(func=lambda message: message.text == "Neighbor-IP")
 def send_neighbor_list(message):
     logger.info(f"Received List command from {message.chat.id}")
@@ -537,7 +730,6 @@ def send_neighbor_list(message):
     if not neighbors:
         bot.reply_to(message, "Neighbor list is empty.")
         return
-    
     neighbor_info = "\n".join([
         f"Identity: {n.get('identity')}; \nInterface: {n.get('interface')}; \nBoard: {n.get('board')}; \n"
         f"Interface-Name: {n.get('interface-name')}; \nPlatform: {n.get('platform')}; \n"
@@ -551,6 +743,19 @@ def send_neighbor_list(message):
     max_length = 4096
     for i in range(0, len(neighbor_info), max_length):
         bot.reply_to(message, neighbor_info[i:i + max_length])
+
+# handle dns
+@bot.message_handler(func=lambda message: message.text == "List-Dns")
+def send_dns_list(message):
+    logger.info(f"Received List command from {message.chat.id}")
+    dns = get_dns()
+    dns_info = (
+        f"Servers: {dns['servers']}\n"
+        f"Dynamic Servers: {dns['dynamic-servers']}\n"
+        f"{'allow-remote-requests✅' if dns['allow-remote-requests'] == 'checked' else 'allow-remote-requests❌'}\n"
+    )
+    bot.reply_to(message, dns_info)
+
 
 # Hotspot Handlers
 @bot.message_handler(func=lambda message: message.text == "Total")
@@ -659,6 +864,178 @@ def enter_length(message):
         bot.reply_to(message, f"{voucher_count} voucher telah di-generate:\n\n" + "\n".join(generated_users))
     except ValueError:
         bot.reply_to(message, "Silahkan masukkan panjang digit yang valid.")
+        
+# handle queue
+ITEMS_PER_PAGE = 10  
+@bot.message_handler(func=lambda message: message.text.startswith("List-Queue"))
+def send_queue_list_paginated(message):
+    user_id = message.chat.id
+    queues = get_queue_list()
+    if not queues:
+        bot.reply_to(message, "Tidak ada Queue yang ditemukan.")
+        return
+    # Inisialisasi halaman pertama untuk pengguna
+    if user_id not in queue_pages:
+        queue_pages[user_id] = 0  # Halaman awal
+    page = queue_pages[user_id]
+    # Hitung indeks awal dan akhir
+    start_idx = page * ITEMS_PER_PAGE
+    end_idx = start_idx + ITEMS_PER_PAGE
+    paginated_queues = queues[start_idx:end_idx]
+    # Jika data kosong untuk halaman ini
+    if not paginated_queues:
+        bot.reply_to(message, "Tidak ada lebih banyak Queue untuk ditampilkan.")
+        return
+    # Format informasi Queue
+    queue_info = "\n".join([
+        f"name: {queue['name']} \ntarget: {queue['target']} \n(max-limit: {int(queue['max-limit'].split('/')[0]) / 1_000_000:.2f} Mbps / {int(queue['max-limit'].split('/')[1]) / 1_000_000:.2f} Mbps) \n"
+        f"(burst-limit: {queue['burst-limit']}) \n(burst-time: {queue['burst-time']}) \n(limit-at: {queue['limit-at']}) \n(priority: {queue['priority']})"
+        f"\n# {'❌ Disable' if queue['status'] == 'disabled' else '✅ Enabled'}"
+        f"- {'🔃 Dynamic' if queue['dynamic'] == 'Dynamic' else '🔒Static'} - \nComment: {queue['comment']}\n\n"
+        for queue in paginated_queues
+    ])
+    # Kirim informasi Queue
+    bot.reply_to(message, queue_info)
+    total_pages = math.ceil(len(queues) / ITEMS_PER_PAGE)
+    bot.reply_to(message, f"Halaman {page + 1} dari {total_pages}")
+    # Tambahkan tombol navigasi
+    markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+    if page > 0:
+        markup.add(types.KeyboardButton("Prev"))
+    if page < total_pages - 1:
+        markup.add(types.KeyboardButton("Next"))
+    markup.add(types.KeyboardButton("Kembali"))
+    bot.send_message(user_id, "Gunakan tombol untuk navigasi halaman.", reply_markup=markup)
+
+# Fungsi untuk navigasi halaman
+@bot.message_handler(func=lambda message: message.text == "Next")
+def next_page(message):
+    user_id = message.chat.id
+    if user_id in queue_pages:
+        queue_pages[user_id] += 1  
+        send_queue_list_paginated(message)
+
+@bot.message_handler(func=lambda message: message.text == "Prev")
+def prev_page(message):
+    user_id = message.chat.id
+    if user_id in queue_pages and queue_pages[user_id] > 0:
+        queue_pages[user_id] -= 1  
+        send_queue_list_paginated(message)
+
+@bot.message_handler(func=lambda message: message.text == "Disable-Queue")
+def disable_queue_menu(message):
+    logger.info(f"Disable menu selected by {message.chat.id}")
+    queues = get_queue_list()
+    queue_pages[message.chat.id] = 0  # Set halaman awal
+    send_queue_menu(message.chat.id, queues, 0)
+
+def send_queue_menu(chat_id, queues, page):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    start = page * ITEMS_PER_PAGE
+    end = start + ITEMS_PER_PAGE
+    sliced_queues = queues[start:end]
+    for queue in sliced_queues:
+        markup.add(types.KeyboardButton(f"Disable-Queue {queue['name']}"))
+    # Tambahkan tombol navigasi halaman
+    if page > 0:
+        markup.add(types.KeyboardButton("Prev Page"))
+    if end < len(queues):
+        markup.add(types.KeyboardButton("Next Page"))
+    markup.add(types.KeyboardButton("Kembali"))
+    bot.send_message(chat_id, "Silakan pilih queue yang akan di-disable:", reply_markup=markup)
+
+@bot.message_handler(func=lambda message: message.text in ["Next Page", "Prev Page"])
+def handle_page_navigation(message):
+    chat_id = message.chat.id
+    queues = get_queue_list()
+    if message.text == "Next Page":
+        queue_pages[chat_id] += 1
+    elif message.text == "Prev Page":
+        queue_pages[chat_id] -= 1
+    
+    send_queue_menu(chat_id, queues, queue_pages[chat_id])
+
+@bot.message_handler(func=lambda message: message.text.startswith("Disable-Queue "))
+def handle_disable_queue(message):
+    queue_name = message.text.split("Disable-Queue ")[1]
+    logger.info(f"Received /queue_disable command for {queue_name} from {message.chat.id}")
+    result = disable_queue(queue_name)
+    bot.reply_to(message, result)
+
+@bot.message_handler(func=lambda message: message.text == "Enable-Queue")
+def enable_queue_menu(message):
+    logger.info(f"Enable menu selected by {message.chat.id}")
+    queues = get_queue_list()
+    queue_pages[message.chat.id] = 0  
+    send_queuenable_menu(message.chat.id, queues, 0)
+
+def send_queuenable_menu(chat_id, queues, page):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    start = page * ITEMS_PER_PAGE
+    end = start + ITEMS_PER_PAGE
+    sliced_queues = queues[start:end]
+    for queue in sliced_queues:
+        markup.add(types.KeyboardButton(f"Enable-Queue {queue['name']}"))
+    # Tambahkan tombol navigasi halaman
+    if page > 0:
+        markup.add(types.KeyboardButton("Prev Page"))
+    if end < len(queues):
+        markup.add(types.KeyboardButton("Next Page"))
+    markup.add(types.KeyboardButton("Kembali"))
+    bot.send_message(chat_id, "Silakan pilih queue yang akan di-Enable:", reply_markup=markup)
+
+@bot.message_handler(func=lambda message: message.text in ["Next Page", "Prev Page"])
+def handle_page_navigation(message):
+    chat_id = message.chat.id
+    queues = get_queue_list()
+    if message.text == "Next Page":
+        queue_pages[chat_id] += 1
+    elif message.text == "Prev Page":
+        queue_pages[chat_id] -= 1
+    send_queuenable_menu(chat_id, queues, queue_pages[chat_id])
+
+@bot.message_handler(func=lambda message: message.text.startswith("Enable-Queue "))
+def handle_enable_queue(message):
+    queue_name = message.text.split("Enable-Queue ")[1]
+    logger.info(f"Received /queue_enable command for {queue_name} from {message.chat.id}")
+    result = enable_queue(queue_name)
+    bot.reply_to(message, result)
+    
+@bot.message_handler(func=lambda message: message.text == "Limit")
+def limit_queue_menu(message):
+    try:
+        logger.info(f"Limit menu selected by {message.chat.id}")
+        queues = get_queue_list()
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        for queue in queues:
+            markup.add(types.KeyboardButton(f"Limit {queue['name']}"))
+        markup.add(types.KeyboardButton("Kembali"))
+        bot.reply_to(message, "Silakan pilih Queue yang akan di-limit:", reply_markup=markup)
+    except Exception as e:
+        logger.error(f"Failed to fetch queue list: {e}")
+        bot.reply_to(message, "Gagal mengambil daftar Queue. Silakan coba lagi.")
+
+@bot.message_handler(func=lambda message: message.text.startswith("Limit "))
+def handle_limit_queue(message):
+    queue_name = message.text.split("Limit ")[1]
+    logger.info(f"Received /queue_c_limit command for {queue_name} from {message.chat.id}")
+    queue_set_state[message.chat.id] = queue_name
+    bot.reply_to(message, f"Masukkan limit baru untuk Queue {queue_name} :\n\n Contoh: 1M/1M.")
+
+@bot.message_handler(func=lambda message: message.chat.id in queue_set_state)
+def handle_new_queue_limit(message):
+    queue_name = queue_set_state.pop(message.chat.id, None)
+    if queue_name:
+        queue_limit = message.text.strip()
+        if not re.match(r"^\d+[KMG]?/\d+[KMG]?$", queue_limit):
+            bot.reply_to(message, "Format limit tidak valid. Contoh: 1M/1M.")
+            return
+        logger.info(f"Limiting Queue {queue_name} to {queue_limit}")
+        result = change_queue_limit(queue_name, queue_limit)
+        bot.reply_to(message, result, reply_markup=types.ReplyKeyboardRemove())
+        bot.reply_to(message, "Gunakan perintah `List-Queue` untuk memeriksa perubahan.")
+    else:
+        bot.reply_to(message, "Tidak ada permintaan perubahan limit Queue yang aktif.")
 
 # Handle Netwatch
 @bot.message_handler(func=lambda message: message.text == "List-Netwatch")
@@ -694,7 +1071,7 @@ def add_netwatch_menu(message):
         parse_mode="Markdown"
     )
 
-@bot.message_handler(func=lambda message: " " in message.text and len(message.text.split()) == 2 and not message.text.startswith(("Disable-Netwatch", "Remove-Netwatch", "Enable-Netwatch", "Set-Netwatch-Host", "Edit")))
+@bot.message_handler(func=lambda message: " " in message.text and len(message.text.split()) == 2 and not message.text.startswith(("Disable-Netwatch", "Disable-Queue", "Remove-Netwatch", "Enable-Netwatch", "Set-Netwatch-Host", "Edit", "Distance")))
 def handle_add_netwatch(message):
     try:
         # Mengambil host dan comment dari input
@@ -815,4 +1192,4 @@ def handle_remove_netwatch(message):
     else:
         bot.reply_to(message, f"Netwatch dengan host {host} tidak ditemukan.")
 
-bot.polling()
+bot.polling(timeout=60, long_polling_timeout=60)
